@@ -4,12 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0b1020">
+<meta name="color-scheme" content="dark">
+<meta name="darkreader-lock">
 <title>비행 트래커</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <style>
-:root{--bg:#0b1020;--card:#141a2e;--line:#253052;--text:#eef1f8;--sub:#8b95b3;--acc:#ff7a45;--acc2:#4cc3ff;--ok:#3ddc97;--land:#1d2643;--sea:#0f1630}
+:root{color-scheme:dark;--bg:#0b1020;--card:#141a2e;--line:#253052;--text:#eef1f8;--sub:#8b95b3;--acc:#ff7a45;--acc2:#4cc3ff;--ok:#3ddc97;--land:#1d2643;--sea:#0f1630}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;min-height:100vh;padding:16px 16px 40px}
 .wrap{max-width:520px;margin:0 auto}
@@ -120,6 +122,10 @@ button{width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-w
       <div class="st"><span>GPS 정확도</span><b id="acc">-</b></div>
     </div>
     <button class="pri" id="gpsBtn">GPS 켜기</button>
+    <div class="row" style="margin-top:0">
+      <button class="ghost" id="optSaver" style="margin-top:10px"></button>
+      <button class="ghost" id="optWake" style="margin-top:10px"></button>
+    </div>
     <div class="msg" id="gmsg">창가에 폰을 대면 잘 잡혀요. 첫 위치까지 몇 분 걸릴 수 있어요. 신호가 2분 넘게 끊기면 자동으로 시간 기준 추정으로 바뀌어요.</div>
     <div class="row">
       <button class="sec" id="adj">시간 수정</button>
@@ -226,21 +232,21 @@ function buildMap(){
   const g=add("g",{id:"plane"});add("circle",{r:12,fill:"#ff7a45",opacity:.18},g);
   add("path",{d:"M11 0 L-7 -8 L-3 0 L-7 8 Z",fill:"#ffffff"},g)}
 
-let gps=null,watchId=null,trk=[];
-function gpsFresh(){return gps&&Date.now()-gps.t<120000}
+let gps=null,watchId=null,trk=[],gpsResume=null;
+function gpsFresh(){return gps&&Date.now()-gps.t<(opt().saver?240000:120000)}
 function baseFix(pos){const c=pos.coords,t=Date.now();let sp=c.speed!=null&&!isNaN(c.speed)?c.speed*3.6:null;
   if(gps&&(sp==null)){const dt=(t-gps.t)/3600000;if(dt>0.002){const d=gdist({lat:gps.lat,lon:gps.lon},{lat:c.latitude,lon:c.longitude});sp=d/dt}}
   if(plan&&plan.armed){const v=c.speed!=null&&!isNaN(c.speed)?c.speed*3.6:sp;if(v!=null&&v>220){plan._fast=(plan._fast||0)+1;if(plan._fast>=2){takeoff(t-30000);}}else plan._fast=0;
     $("waitMsg").textContent="GPS 수신 중 · 현재 속도 "+(v!=null?Math.round(v):0)+" km/h · 시속 220km 넘으면 자동 시작"}
   const prev=gps;gps={lat:c.latitude,lon:c.longitude,alt:c.altitude,acc:c.accuracy,spd:sp!=null?sp:(prev?prev.spd:null),hd:c.heading,t};
-  if(gps.spd!=null&&prev&&prev.spdS!=null)gps.spdS=prev.spdS*.8+gps.spd*.2;else gps.spdS=gps.spd;
-  const last=trk[trk.length-1];if(plan&&plan.armed){}else if(!last||t-last[2]>20000){trk.push([gps.lon,gps.lat,t]);if(trk.length>1500)trk.shift();LS.set("ft_trk",trk)}
+  if(gps.spd!=null&&gps.spd>1300)gps.spd=prev?prev.spdS:null;if(gps.spd!=null&&prev&&prev.spdS!=null)gps.spdS=prev.spdS*.8+gps.spd*.2;else gps.spdS=gps.spd;
+  const last=trk[trk.length-1];if(plan&&plan.armed){}else if(!last||t-last[2]>20000){trk.push([gps.lon,gps.lat,t,gps.alt!=null?Math.round(gps.alt):null,gps.spd!=null&&gps.spd<1300?Math.round(gps.spd):null]);if(trk.length>1500)trk.shift();LS.set("ft_trk",trk)}
   $("gmsg").textContent="GPS 수신 중 · 마지막 수신 "+new Date(t).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"});$("gmsg").className="msg";tick()}
 function onErr(e){const m={1:"위치 권한이 거부됐어요. 크롬 설정에서 이 파일(또는 크롬)의 위치 권한을 허용해 주세요.",2:"위치를 못 잡고 있어요. 창가에 폰을 대고 기다려 주세요.",3:"아직 위성을 찾는 중이에요. 창가에서 조금만 기다려 주세요."};$("gmsg").textContent=(m[e.code]||"GPS 오류")+(window.isSecureContext===false?" (이 방식으로 연 파일은 위치 사용이 막혀 있을 수 있어요)":"");$("gmsg").className="msg err"}
 function gpsOn(){if(!navigator.geolocation){onErr({code:0});return}
   watchId=navigator.geolocation.watchPosition(onFix,onErr,{enableHighAccuracy:true,maximumAge:5000,timeout:90000});
   if(plan){plan.gps=true;save()}$("gpsBtn").textContent="GPS 끄기";$("gpsBtn").className="sec";$("gmsg").textContent="위성 찾는 중… 창가에 폰을 대주세요.";$("gmsg").className="msg"}
-function gpsOff(){if(watchId!=null)navigator.geolocation.clearWatch(watchId);watchId=null;if(plan){plan.gps=false;save()}$("gpsBtn").textContent="GPS 켜기";$("gpsBtn").className="pri";tick()}
+function gpsOff(){clearTimeout(gpsResume);if(watchId!=null&&watchId!==-1)navigator.geolocation.clearWatch(watchId);watchId=null;if(plan){plan.gps=false;save()}$("gpsBtn").textContent="GPS 켜기";$("gpsBtn").className="pri";tick()}
 $("gpsBtn").onclick=()=>watchId==null?gpsOn():gpsOff();
 function phaseOf(p,el,dur){if(p>=1)return["도착 예정 시각 지남","var(--ok)"];if(el<20*60)return["상승 중","var(--acc2)"];if(dur-el<30*60)return["강하·접근 중","var(--acc)"];return["순항 중","var(--acc2)"]}
 function baseTick(){if(!plan)return;
@@ -256,7 +262,7 @@ function baseTick(){if(!plan)return;
   $("bar").style.width=(p*100)+"%";$("pctL").textContent=Math.floor(p*100)+"%";
   $("el").textContent=fmt(el);$("rm").textContent=fmt(plan.dur-el);
   $("rkm").textContent=Math.round(km*(1-p)).toLocaleString()+" km";
-  const eta=new Date(plan.start+plan.dur*1000);$("eta").textContent=eta.getHours()+":"+String(eta.getMinutes()).padStart(2,"0");
+  const eta=new Date(plan.start+plan.dur*1000);$("eta").textContent=hm(eta);
   $("pctR").textContent=Math.round(km*p).toLocaleString()+" / "+Math.round(km).toLocaleString()+" km";
   $("pos").textContent=ll(cur);$("spd").textContent=Math.round(km/(plan.dur/3600))+" km/h";
   const [ph,col]=phaseOf(p,el,plan.dur);$("phase").textContent=ph;$("phase").style.color=col;
@@ -282,7 +288,7 @@ function startTrack(){
   $("tO").textContent=plan.o.code;$("tOn").textContent=plan.o.ko;$("tD").textContent=plan.d.code;$("tDn").textContent=plan.d.ko;
   $("tF").textContent=plan.fn;$("tDist").textContent=Math.round(gdist(plan.o,plan.d)).toLocaleString()+" km";
   buildMap();tick();clearInterval(timer);timer=setInterval(tick,1000);
-  try{navigator.wakeLock&&navigator.wakeLock.request("screen").catch(()=>{})}catch(e){}}
+  applyWake()}
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&plan&&plan.start)tick()});
 $("adj").onclick=()=>{if(plan.armed){alert("이륙 후에 수정할 수 있어요.");return}const el=(Date.now()-plan.start)/1000;const cur=Math.max(0,Math.round((plan.dur-el)/60));
   const v=prompt("지금부터 남은 비행시간을 분 단위로 입력하세요 (예: 기장 방송 '2시간 10분' → 130)",cur);if(v===null)return;const n=parseInt(v,10);if(isNaN(n)||n<0)return;
@@ -290,13 +296,16 @@ $("adj").onclick=()=>{if(plan.armed){alert("이륙 후에 수정할 수 있어�
 $("stop").onclick=()=>{if(!confirm("추적을 끝낼까요?"))return;clearInterval(timer);plan=null;LS.del("ft_active");LS.del("ft_trk");trk=[];gpsOff();gps=null;history.replaceState(null,"",location.pathname);$("track").classList.add("hid");$("setup").classList.remove("hid");$("confirm").classList.add("hid")};
 
 const KO={"South Korea":"대한민국","North Korea":"북한","Japan":"일본","China":"중국","Taiwan":"대만","Philippines":"필리핀","Vietnam":"베트남","Laos":"라오스","Cambodia":"캄보디아","Thailand":"태국","Myanmar":"미얀마","Malaysia":"말레이시아","Indonesia":"인도네시아","Brunei":"브루나이","Mongolia":"몽골","India":"인도","Bangladesh":"방글라데시","Papua New Guinea":"파푸아뉴기니","Australia":"호주","Timor-Leste":"동티모르","United Arab Emirates":"아랍에미리트","Saudi Arabia":"사우디아라비아","Russia":"러시아"};
-const SEAS=[["대한해협",33.3,35.4,128,130.6],["동해",35,46,129,141],["서해",33,40.5,119,126.6],["대만해협",22,26,117,121],["바시 해협",19,22,119.5,122.5],["동중국해",24,33.5,120,131],["태국만",6,14,99,105],["싱가포르 해협",0.8,1.6,103,105],["남중국해",0,23,105,121],["필리핀해",5,30,121,145],["자바해",-8,-3,106,118],["안다만해",5,17,92,99],["말라카 해협",1,6,98,103]];
+const SEAS=[["대한해협",33.3,35.4,128,130.6],["동해",35,46,129,141],["서해",33,40.5,119,126.6],["대만해협",22,26,117,121],["바시 해협",19,22,119.5,122.5],["동중국해",24,34.2,120,128.6],["동중국해",24,33.3,128.6,131],["태국만",6,14,99,105],["싱가포르 해협",0.8,1.6,103,105],["말라카 해협",1,6,98,103],["카리마타 해협",-3.5,0.8,105.5,110],["나투나해",0.8,2.5,104,110],["남중국해",2.5,23,103.5,121],["술루해",5,12,118,123],["셀레베스해",1,7,119,126],["필리핀해",5,30,121,145],["자바해",-8,-3,106,118],["안다만해",5,17,92,99],["벵골만",5,22,80,92],["서태평양",-10,40,128,180],["인도양",-40,5,40,100]];
 const CFEAT=topojson.feature(CTRY,CTRY.objects.countries).features;
 const TZC={KR:"Asia/Seoul",JP:"Asia/Tokyo",CN:"Asia/Shanghai",TW:"Asia/Taipei",HK:"Asia/Hong_Kong",MO:"Asia/Macau",SG:"Asia/Singapore",MY:"Asia/Kuala_Lumpur",TH:"Asia/Bangkok",VN:"Asia/Ho_Chi_Minh",PH:"Asia/Manila",ID:"Asia/Jakarta",KH:"Asia/Phnom_Penh",LA:"Asia/Vientiane",MM:"Asia/Yangon",MN:"Asia/Ulaanbaatar",GU:"Pacific/Guam",MP:"Pacific/Saipan",AE:"Asia/Dubai",AU:"Australia/Sydney",IN:"Asia/Kolkata",BN:"Asia/Brunei",US:"America/Los_Angeles",GB:"Europe/London",FR:"Europe/Paris",DE:"Europe/Berlin"};
 const TZA={DPS:"Asia/Makassar",BKI:"Asia/Kuching",DXB:"Asia/Dubai",SYD:"Australia/Sydney",UBN:"Asia/Ulaanbaatar",GUM:"Pacific/Guam",SPN:"Pacific/Saipan",HKG:"Asia/Hong_Kong",MFM:"Asia/Macau",SIN:"Asia/Singapore",KUL:"Asia/Kuala_Lumpur",CGK:"Asia/Jakarta"};
 const APC={ICN:"KR",GMP:"KR",PUS:"KR",CJU:"KR",TAE:"KR",CJJ:"KR",BKK:"TH",DMK:"TH",HKT:"TH",CNX:"TH",SGN:"VN",HAN:"VN",DAD:"VN",CXR:"VN",PQC:"VN",MNL:"PH",CEB:"PH",CRK:"PH",TPE:"TW",TSA:"TW",KHH:"TW",NRT:"JP",HND:"JP",KIX:"JP",FUK:"JP",NGO:"JP",CTS:"JP",OKA:"JP",PVG:"CN",PEK:"CN",PKX:"CN",CAN:"CN",TAO:"CN"};
 function tzOf(ap){if(ap.tz)return ap.tz;if(TZA[ap.code])return TZA[ap.code];const c=ap.cc||APC[ap.code];if(c&&TZC[c])return TZC[c];return null}
-function hm(date,tz){try{return new Intl.DateTimeFormat("ko-KR",{timeZone:tz||undefined,hour:"2-digit",minute:"2-digit",hour12:false}).format(date)}catch(e){return date.getHours()+":"+String(date.getMinutes()).padStart(2,"0")}}
+const TZOFF={"Asia/Seoul":540,"Asia/Tokyo":540,"Asia/Shanghai":480,"Asia/Taipei":480,"Asia/Hong_Kong":480,"Asia/Macau":480,"Asia/Singapore":480,"Asia/Kuala_Lumpur":480,"Asia/Kuching":480,"Asia/Brunei":480,"Asia/Manila":480,"Asia/Makassar":480,"Asia/Ulaanbaatar":480,"Asia/Bangkok":420,"Asia/Ho_Chi_Minh":420,"Asia/Jakarta":420,"Asia/Phnom_Penh":420,"Asia/Vientiane":420,"Asia/Yangon":390,"Asia/Kolkata":330,"Asia/Dubai":240,"Pacific/Guam":600,"Pacific/Saipan":600};
+function p2(n){return String(n).padStart(2,"0")}
+function hm(date,tz){if(!tz)return p2(date.getHours())+":"+p2(date.getMinutes());const off=TZOFF[tz];if(off!=null){const d=new Date(date.getTime()+off*60000);return p2(d.getUTCHours())+":"+p2(d.getUTCMinutes())}
+  try{return new Intl.DateTimeFormat("en-GB",{timeZone:tz,hour:"2-digit",minute:"2-digit",hour12:false}).format(date)}catch(e){return p2(date.getHours())+":"+p2(date.getMinutes())}}
 function regionAt(lon,lat){for(const f of CFEAT){if(d3.geoContains(f,[lon,lat])){const n=f.properties.name;return{name:(KO[n]||n),land:true}}}
   for(const s of SEAS){if(lat>=s[1]&&lat<=s[2]&&lon>=s[3]&&lon<=s[4])return{name:s[0],land:false}}return{name:"바다",land:false}}
 function sunPos(date,lat,lon){const rd=Math.PI/180,d=date/86400000-10957.5,M=rd*(357.5291+0.98560028*d),C=rd*(1.9148*Math.sin(M)+0.02*Math.sin(2*M)+0.0003*Math.sin(3*M)),L=M+C+rd*102.9372+Math.PI,e=rd*23.4397,dec=Math.asin(Math.sin(e)*Math.sin(L)),ra=Math.atan2(Math.sin(L)*Math.cos(e),Math.cos(L)),th=rd*(280.16+360.9856235*d)+rd*lon,H=th-ra,phi=rd*lat;
@@ -317,24 +326,57 @@ function extraTick(){if(!plan)return;const cp=curPos(),[lon,lat]=cp.ll;
   if(plan.start&&!plan.armed){let etaMs;if(plan.end)etaMs=plan.end;else if(gpsFresh()&&gps.spdS>250){const rk=gdist({lat:gps.lat,lon:gps.lon},plan.d);etaMs=Date.now()+(rk/gps.spdS*3600+(rk>150?600:0))*1000}else etaMs=plan.start+plan.dur*1000;
     $("etaL").textContent=hm(new Date(etaMs),dtz);$("eta").textContent=hm(new Date(etaMs),undefined)}else $("etaL").textContent="-";
   const s=sunPos(new Date(),lat,lon),hd=cp.hd!=null?cp.hd:bearing(cp.ll,[plan.d.lon,plan.d.lat]);const rel=(s.az-hd+360)%360;
-  let side=rel<25||rel>335?"정면":rel>155&&rel<205?"뒤쪽":rel<180?"오른쪽 창":"왼쪽 창";
-  let st;if(s.alt>8)st="낮 · 해가 "+side+" 쪽에 있어요";else if(s.alt>-1)st=(new Date().getHours()<12?"일출 무렵":"일몰 무렵")+" · "+side+" 쪽을 보세요";else if(s.alt>-12)st="해 진 직후·여명 · "+side+" 쪽 하늘이 밝아요";else st="밤 · 반대쪽 창이 별 보기 좋아요";
+  const side=rel<25||rel>335?"비행기 앞쪽":rel>155&&rel<205?"비행기 뒤쪽":rel<180?"오른쪽 창":"왼쪽 창";
+  const rising=sunPos(new Date(Date.now()+600000),lat,lon).alt>s.alt;let st;
+  if(s.alt>8)st="낮 · 해가 "+side+" 쪽에 있어요";
+  else if(s.alt>-1)st=(rising?"해 뜨는 중":"해 지는 중")+" · "+side+" 쪽을 보세요";
+  else if(s.alt>-12)st=(rising?"해 뜨기 직전":"해 진 직후")+" · "+side+" 쪽 하늘이 밝아요";
+  else st="밤 · 해 걱정 없이 어느 창이든 좋아요";
   $("sun").textContent=st;$("sunSub").textContent="해 고도 "+Math.round(s.alt)+"° · 방위 "+Math.round(s.az)+"° · 진행 방향 "+Math.round(hd)+"°";
   if(plan.end){$("phase").textContent="착륙";$("phase").style.color="var(--ok)";$("stop").textContent="기록 보고 끝내기"}}
-function airborneStats(){if(!gps||!plan||!plan.start||plan.armed||plan.end)return;if(gps.alt!=null)plan.maxAlt=Math.max(plan.maxAlt||0,gps.alt);if(gps.spdS!=null&&gps.spdS<1300)plan.maxSpd=Math.max(plan.maxSpd||0,gps.spdS)}
+function med(a){const s=a.filter(x=>x!=null).sort((x,y)=>x-y);return s.length?s[Math.floor(s.length/2)]:null}
+function airborneStats(){if(!gps||!plan||!plan.start||plan.armed||plan.end)return;
+  plan._sp=(plan._sp||[]).concat([gps.spd!=null&&gps.spd<1300?gps.spd:null]).slice(-5);plan._al=(plan._al||[]).concat([gps.alt]).slice(-5);
+  if(plan._sp.length>=5){const m=med(plan._sp);if(m!=null)plan.maxSpd=Math.max(plan.maxSpd||0,m)}
+  if(plan._al.length>=5){const m=med(plan._al);if(m!=null)plan.maxAlt=Math.max(plan.maxAlt||0,m)}}
 function extraFix(pos){if(!plan||!plan.start||plan.armed||plan.end)return;airborneStats();const c=pos.coords;const v=c.speed!=null&&!isNaN(c.speed)?c.speed*3.6:gps.spd;const el=(Date.now()-plan.start)/1000;
-  if(el>15*60&&v!=null&&v<50){plan._slow=(plan._slow||0)+1;if(plan._slow>=3)land(Date.now()-60000)}else plan._slow=0;save()}
+  if(el>15*60&&v!=null&&v<50){plan._slow=(plan._slow||0)+1;if(plan._slow>=3)land(Date.now()-60000)}else plan._slow=0;save();
+  const remK=gdist({lat:gps.lat,lon:gps.lon},plan.d);
+  if(!plan.end&&opt().saver&&el>20*60&&v!=null&&v>450&&remK>300&&watchId!=null&&watchId!==-1){navigator.geolocation.clearWatch(watchId);watchId=-1;clearTimeout(gpsResume);
+    gpsResume=setTimeout(()=>{if(watchId===-1)watchId=navigator.geolocation.watchPosition(onFix,onErr,{enableHighAccuracy:true,maximumAge:5000,timeout:90000})},90000);
+    $("gmsg").textContent="배터리 절약 중 · 순항 중엔 90초마다 위치를 받아요 · 마지막 수신 "+hm(new Date());$("gmsg").className="msg"}}
+function opt(){return Object.assign({saver:true,wake:false},LS.get("ft_opts")||{})}
+let wakeObj=null;function applyWake(){try{if(opt().wake&&plan&&navigator.wakeLock){if(!wakeObj)navigator.wakeLock.request("screen").then(w=>{wakeObj=w;w.addEventListener("release",()=>{wakeObj=null})}).catch(()=>{})}else if(wakeObj){wakeObj.release();wakeObj=null}}catch(e){}drawOpts()}
+function drawOpts(){const o=opt();$("optSaver").textContent="배터리 절약 "+(o.saver?"켜짐":"꺼짐");$("optSaver").style.color=o.saver?"var(--ok)":"var(--sub)";$("optWake").textContent="화면 켜두기 "+(o.wake?"켜짐":"꺼짐");$("optWake").style.color=o.wake?"var(--ok)":"var(--sub)"}
+$("optSaver").onclick=()=>{const o=opt();o.saver=!o.saver;LS.set("ft_opts",o);if(!o.saver&&watchId===-1){clearTimeout(gpsResume);watchId=navigator.geolocation.watchPosition(onFix,onErr,{enableHighAccuracy:true,maximumAge:5000,timeout:90000})}drawOpts();toast(o.saver?"순항 중엔 90초마다 위치를 받아요":"GPS를 계속 켜둬요 (배터리 소모 큼)")};
+$("optWake").onclick=()=>{const o=opt();o.wake=!o.wake;LS.set("ft_opts",o);applyWake();toast(o.wake?"화면이 꺼지지 않아요 · 밝기를 낮추면 배터리를 아낄 수 있어요":"화면이 꺼지면 GPS 기록이 잠시 멈추지만 시간 기준 추적은 계속돼요")};
+document.addEventListener("visibilitychange",()=>{if(!document.hidden){wakeObj=null;applyWake();if(watchId===-1&&gps&&Date.now()-gps.t>90000){clearTimeout(gpsResume);watchId=navigator.geolocation.watchPosition(onFix,onErr,{enableHighAccuracy:true,maximumAge:5000,timeout:90000})}}});
+drawOpts();
 function land(ts){if(!plan||plan.end)return;plan.end=ts||Date.now();delete plan._slow;saveLog();save();toast(plan.d.ko+" 착륙! 비행 기록을 저장했어요");tick()}
 function saveLog(){if(!plan||!plan.start||plan.logged)return;const end=plan.end||Date.now();if(end-plan.start<10*60000)return;
-  const step=Math.max(1,Math.ceil(trk.length/150));const lg={id:Date.now(),fn:plan.fn,o:plan.o,d:plan.d,start:plan.start,end,dist:Math.round(gdist(plan.o,plan.d)),maxAlt:plan.maxAlt||null,maxSpd:plan.maxSpd||null,trk:trk.filter((x,i)=>i%step===0).map(x=>[+x[0].toFixed(3),+x[1].toFixed(3)]),cross:(plan.cross||[]).map(c=>c.n),gps:trk.length>3};
+  const step=Math.max(1,Math.ceil(trk.length/150)),sm=trk.filter((x,i)=>i%step===0);
+  const lg={id:Date.now(),fn:plan.fn,o:plan.o,d:plan.d,start:plan.start,end,dist:Math.round(gdist(plan.o,plan.d)),maxAlt:plan.maxAlt||null,maxSpd:plan.maxSpd||null,trk:sm.map(x=>[+x[0].toFixed(3),+x[1].toFixed(3)]),ser:sm.filter(x=>x[3]!=null||x[4]!=null).map(x=>[Math.round((x[2]-plan.start)/60000),x[3],x[4]]),cross:(plan.cross||[]).map(c=>[c.n,c.t]),gps:trk.length>3};
   const L=LS.get("ft_logs")||[];L.push(lg);LS.set("ft_logs",L.slice(-30));plan.logged=true;drawLogs()}
 function miniMap(lg){const o=[lg.o.lon,lg.o.lat],d=[lg.d.lon,lg.d.lat],ip=d3.geoInterpolate(o,d),mid=ip(.5);const pj=d3.geoOrthographic().rotate([-mid[0],-mid[1]]).clipAngle(90);
   const line={type:"LineString",coordinates:d3.range(0,1.0001,.05).map(ip)};pj.fitExtent([[8,8],[92,62]],line);const gp=d3.geoPath(pj);
   const real=lg.trk&&lg.trk.length>1?'<path d="'+gp({type:"LineString",coordinates:lg.trk})+'" fill="none" stroke="#3ddc97" stroke-width="1.6"/>':"";
   return '<svg viewBox="0 0 100 70" style="width:100px;height:70px;flex:none;border-radius:8px;background:var(--sea)"><path d="'+gp(CMESH)+'" fill="#1d2643"/><path d="'+gp(line)+'" fill="none" stroke="#ff7a45" stroke-width="1.2" stroke-dasharray="2 2"/>'+real+'</svg>'}
+function graph(lg){const S0=(lg.ser||[]).filter(x=>x[0]>=0),S=S0.map((x,i)=>[x[0],med([S0[i-1]&&S0[i-1][1],x[1],S0[i+1]&&S0[i+1][1]]),med([S0[i-1]&&S0[i-1][2],x[2],S0[i+1]&&S0[i+1][2]])]);if(S.length<3)return '<div class="msg">이 기록엔 고도·속도 그래프 데이터가 없어요 (이번 업데이트 이후 비행부터 저장돼요)</div>';
+  const W=300,H=120,tm=Math.max(1,(lg.end-lg.start)/60000),ma=Math.max(1,...S.map(x=>x[1]||0)),ms=Math.max(1,...S.map(x=>x[2]||0));
+  const X=t=>8+t/tm*(W-16),pa=S.filter(x=>x[1]!=null).map(x=>X(x[0]).toFixed(1)+","+(H-10-(x[1]/ma)*(H-24)).toFixed(1)).join(" "),ps=S.filter(x=>x[2]!=null).map(x=>X(x[0]).toFixed(1)+","+(H-10-(x[2]/ms)*(H-24)).toFixed(1)).join(" ");
+  let ticks="";for(let h=1;h*60<tm;h++)ticks+='<line x1="'+X(h*60)+'" x2="'+X(h*60)+'" y1="10" y2="'+(H-10)+'" stroke="#253052" stroke-width=".5"/><text x="'+X(h*60)+'" y="'+H+'" fill="#8b95b3" font-size="9" text-anchor="middle">'+h+'h</text>';
+  return '<svg viewBox="0 0 '+W+' '+(H+4)+'" style="width:100%;margin-top:8px">'+ticks+'<polyline points="'+pa+'" fill="none" stroke="#ff7a45" stroke-width="1.8"/><polyline points="'+ps+'" fill="none" stroke="#4cc3ff" stroke-width="1.4" opacity=".85"/></svg><div class="msg" style="margin-top:2px"><span style="color:#ff7a45">● 고도</span> 최고 '+Math.round((lg.maxAlt||ma)*3.281).toLocaleString()+' ft &nbsp; <span style="color:#4cc3ff">● 속도</span> 최고 '+Math.round(lg.maxSpd||ms)+' km/h</div>'}
+let openLog=null;
 function drawLogs(){const L=(LS.get("ft_logs")||[]).slice().reverse(),box=$("logs");$("logCard").classList.toggle("hid",!L.length);
-  box.innerHTML=L.map(lg=>{const dur=(lg.end-lg.start)/1000,dt=new Date(lg.start);return '<div class="lg">'+miniMap(lg)+'<div style="min-width:0;flex:1"><b>'+lg.fn+' · '+lg.o.code+'→'+lg.d.code+'</b><div class="msg" style="margin:2px 0 0">'+(dt.getMonth()+1)+'/'+dt.getDate()+' · 비행 '+fmt(dur).slice(0,-3)+' · '+lg.dist.toLocaleString()+' km</div><div class="msg" style="margin:0">'+(lg.maxAlt?'최고 '+Math.round(lg.maxAlt*3.281).toLocaleString()+' ft':'GPS 기록 없음')+(lg.maxSpd?' · 최고 '+Math.round(lg.maxSpd)+' km/h':'')+'</div>'+(lg.cross&&lg.cross.length?'<div class="msg" style="margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+lg.cross.join(' → ')+'</div>':'')+'</div><button class="ghost" style="width:auto;margin:0;padding:6px 8px;font-size:12px" data-del="'+lg.id+'">삭제</button></div>'}).join("");
-  box.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{if(!confirm("이 기록을 삭제할까요?"))return;LS.set("ft_logs",(LS.get("ft_logs")||[]).filter(x=>String(x.id)!==b.dataset.del));drawLogs()})}
+  box.innerHTML=L.map(lg=>{const dur=(lg.end-lg.start)/1000,dt=new Date(lg.start),op=openLog===lg.id,cr=(lg.cross||[]).map(c=>Array.isArray(c)?c:[c,null]);
+    const head='<div class="lg" data-open="'+lg.id+'" style="cursor:pointer">'+miniMap(lg)+'<div style="min-width:0;flex:1"><b>'+lg.fn+' · '+lg.o.code+'→'+lg.d.code+'</b><div class="msg" style="margin:2px 0 0">'+(dt.getMonth()+1)+'/'+dt.getDate()+' · 비행 '+fmt(dur).slice(0,-3)+'</div><div class="msg" style="margin:0;white-space:nowrap">'+lg.dist.toLocaleString()+' km'+(lg.maxAlt?' · '+Math.round(lg.maxAlt*3.281).toLocaleString()+' ft':'')+'</div></div><span style="color:var(--sub);font-size:18px">'+(op?'▴':'▾')+'</span></div>';
+    if(!op)return head;
+    const det='<div style="padding:4px 0 12px">'+graph(lg)+'<div class="grid" style="margin-top:10px"><div class="st"><span>이륙</span><b style="font-size:16px">'+hm(new Date(lg.start),tzOf(lg.o))+' <small style="font-size:11px;color:var(--sub)">'+lg.o.code+' 현지</small></b></div><div class="st"><span>착륙</span><b style="font-size:16px">'+hm(new Date(lg.end),tzOf(lg.d))+' <small style="font-size:11px;color:var(--sub)">'+lg.d.code+' 현지</small></b></div><div class="st"><span>최고 고도</span><b style="font-size:16px">'+(lg.maxAlt?Math.round(lg.maxAlt*3.281).toLocaleString()+' ft':'-')+'</b></div><div class="st"><span>최고 속도</span><b style="font-size:16px">'+(lg.maxSpd?Math.round(lg.maxSpd)+' km/h':'-')+'</b></div></div>'+
+      (cr.length?'<div class="rg cross"><span>지나온 곳</span><div style="margin-top:6px">'+cr.map(c=>'<div><span>'+(c[1]?hm(new Date(c[1])):'')+'</span>'+c[0]+'</div>').join('')+'</div></div>':'')+
+      '<button class="ghost" data-del="'+lg.id+'" style="margin-top:10px">이 기록 삭제</button></div>';
+    return head+det}).join("");
+  box.querySelectorAll("[data-open]").forEach(e=>e.onclick=()=>{const id=+e.dataset.open;openLog=openLog===id?null:id;drawLogs()});
+  box.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{if(!confirm("이 기록을 삭제할까요?"))return;LS.set("ft_logs",(LS.get("ft_logs")||[]).filter(x=>String(x.id)!==b.dataset.del));openLog=null;drawLogs()})}
 const CMESH=topojson.feature(CTRY,CTRY.objects.countries);
 function resetAll(){clearInterval(timer);plan=null;LS.del("ft_active");LS.del("ft_trk");trk=[];gpsOff();gps=null;$("track").classList.add("hid");$("setup").classList.remove("hid");$("confirm").classList.add("hid");$("stop").textContent="종료";drawLogs()}
 $("stop").onclick=()=>{if(!plan)return;if(plan.end){resetAll();window.scrollTo(0,0);return}
