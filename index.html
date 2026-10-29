@@ -66,8 +66,8 @@ button{width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-w
       </div>
     </div>
     <div class="msg">시간·분. 거리 기준 자동 계산값이에요. 항공권에 적힌 시간에서 지상 이동(약 20~30분)을 뺀 값으로 맞추면 더 정확해요.</div>
-    <button class="pri" id="go">시작!</button>
-    <div class="msg">이륙해서 바퀴가 뜨는 순간 누르세요.</div>
+    <button class="pri" id="go">추적 준비</button>
+    <div class="msg">탑승 후 눌러두면 이륙 대기 상태가 돼요. GPS가 켜져 있으면 속도가 시속 220km를 넘는 순간(이륙 활주) 자동으로 추적이 시작되고, GPS 없이 쓸 땐 이륙할 때 "지금 이륙했어요"를 누르면 돼요.</div>
   </div>
 
   <div class="card">
@@ -91,6 +91,11 @@ button{width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-w
       <div class="ap"><b id="tD"></b><span id="tDn"></span></div>
     </div>
     <svg id="map" viewBox="0 0 360 300"></svg>
+    <div id="wait" class="hid" style="margin-top:14px;text-align:center">
+      <div style="font-size:15px;font-weight:600">이륙 대기 중</div>
+      <div class="msg" id="waitMsg" style="margin-top:6px">GPS를 켜두면 이륙을 자동으로 감지해요.</div>
+      <button class="pri" id="takeoff">지금 이륙했어요</button>
+    </div>
     <div class="bar"><i id="bar"></i></div>
     <div class="pct"><span id="pctL">0%</span><span id="pctR"></span></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="phase" id="phase">순항 중</span><span class="phase" id="gpsTag" style="color:var(--sub)">GPS 꺼짐</span></div>
@@ -182,9 +187,11 @@ function showConfirm(fn,r){
 
 $("go").onclick=()=>{const mn=(+$("hh").value||0)*60+(+$("mm").value||0);if(mn<10){alert("비행시간을 확인해 주세요.");return}
   const all=routes();if(all[plan.fn]){all[plan.fn].min=mn;LS.set("ft_routes",all)}
-  plan.start=Date.now();plan.dur=mn*60;trk=[];LS.del("ft_trk");save();startTrack()};
-function save(){LS.set("ft_active",plan);try{history.replaceState(null,"","#"+encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(plan))))))}catch(e){}}
-function load(){let p=LS.get("ft_active");if(!p&&location.hash.length>1){try{p=JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(location.hash.slice(1))))))}catch(e){}}return p}
+  plan.start=null;plan.armed=true;plan.dur=mn*60;trk=[];LS.del("ft_trk");save();startTrack();if(watchId==null)gpsOn()};
+function takeoff(ts){if(!plan||!plan.armed)return;plan.armed=false;plan.start=ts||Date.now();delete plan._fast;trk=[];LS.del("ft_trk");save();$("wait").classList.add("hid");tick()}
+$("takeoff").onclick=()=>takeoff(Date.now());
+function save(){if(plan)LS.set("ft_active",plan)}
+function load(){if(location.hash)try{history.replaceState(null,"",location.pathname)}catch(e){}return LS.get("ft_active")}
 
 let proj,gpath,interp;
 function buildMap(){
@@ -212,9 +219,11 @@ let gps=null,watchId=null,trk=[];
 function gpsFresh(){return gps&&Date.now()-gps.t<120000}
 function onFix(pos){const c=pos.coords,t=Date.now();let sp=c.speed!=null&&!isNaN(c.speed)?c.speed*3.6:null;
   if(gps&&(sp==null)){const dt=(t-gps.t)/3600000;if(dt>0.002){const d=gdist({lat:gps.lat,lon:gps.lon},{lat:c.latitude,lon:c.longitude});sp=d/dt}}
+  if(plan&&plan.armed){const v=c.speed!=null&&!isNaN(c.speed)?c.speed*3.6:sp;if(v!=null&&v>220){plan._fast=(plan._fast||0)+1;if(plan._fast>=2){takeoff(t-30000);}}else plan._fast=0;
+    $("waitMsg").textContent="GPS 수신 중 · 현재 속도 "+(v!=null?Math.round(v):0)+" km/h · 시속 220km 넘으면 자동 시작"}
   const prev=gps;gps={lat:c.latitude,lon:c.longitude,alt:c.altitude,acc:c.accuracy,spd:sp!=null?sp:(prev?prev.spd:null),hd:c.heading,t};
   if(gps.spd!=null&&prev&&prev.spdS!=null)gps.spdS=prev.spdS*.8+gps.spd*.2;else gps.spdS=gps.spd;
-  const last=trk[trk.length-1];if(!last||t-last[2]>20000){trk.push([gps.lon,gps.lat,t]);if(trk.length>1500)trk.shift();LS.set("ft_trk",trk)}
+  const last=trk[trk.length-1];if(plan&&plan.armed){}else if(!last||t-last[2]>20000){trk.push([gps.lon,gps.lat,t]);if(trk.length>1500)trk.shift();LS.set("ft_trk",trk)}
   $("gmsg").textContent="GPS 수신 중 · 마지막 수신 "+new Date(t).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"});$("gmsg").className="msg";tick()}
 function onErr(e){const m={1:"위치 권한이 거부됐어요. 크롬 설정에서 이 파일(또는 크롬)의 위치 권한을 허용해 주세요.",2:"위치를 못 잡고 있어요. 창가에 폰을 대고 기다려 주세요.",3:"아직 위성을 찾는 중이에요. 창가에서 조금만 기다려 주세요."};$("gmsg").textContent=(m[e.code]||"GPS 오류")+(window.isSecureContext===false?" (이 방식으로 연 파일은 위치 사용이 막혀 있을 수 있어요)":"");$("gmsg").className="msg err"}
 function gpsOn(){if(!navigator.geolocation){onErr({code:0});return}
@@ -223,7 +232,11 @@ function gpsOn(){if(!navigator.geolocation){onErr({code:0});return}
 function gpsOff(){if(watchId!=null)navigator.geolocation.clearWatch(watchId);watchId=null;if(plan){plan.gps=false;save()}$("gpsBtn").textContent="GPS 켜기";$("gpsBtn").className="pri";tick()}
 $("gpsBtn").onclick=()=>watchId==null?gpsOn():gpsOff();
 function phaseOf(p,el,dur){if(p>=1)return["도착 예정 시각 지남","var(--ok)"];if(el<20*60)return["상승 중","var(--acc2)"];if(dur-el<30*60)return["강하·접근 중","var(--acc)"];return["순항 중","var(--acc2)"]}
-function tick(){
+function tick(){if(!plan)return;
+  if(plan.armed){$("wait").classList.remove("hid");$("phase").textContent="이륙 대기";$("phase").style.color="var(--sub)";["el","rm"].forEach(i=>$(i).textContent="0:00:00");$("rkm").textContent=Math.round(gdist(plan.o,plan.d)).toLocaleString()+" km";$("eta").textContent="-";$("bar").style.width="0%";$("pctL").textContent="0%";
+    const tag=$("gpsTag");if(watchId==null){tag.textContent="GPS 꺼짐";tag.style.color="var(--sub)"}else if(gpsFresh()){tag.textContent="● GPS 수신";tag.style.color="var(--ok)";$("pos").textContent=ll([gps.lon,gps.lat]);$("alt").textContent=gps.alt!=null?Math.round(gps.alt*3.281).toLocaleString()+" ft":"-";$("acc").textContent=gps.acc!=null?"±"+Math.round(gps.acc)+" m":"-"}else{tag.textContent="GPS 찾는 중";tag.style.color="var(--acc)"}
+    const p0=proj([plan.o.lon,plan.o.lat]),p1=proj([plan.d.lon,plan.d.lat]);if(p0&&p1)$("plane").setAttribute("transform","translate("+p0[0]+","+p0[1]+") rotate("+Math.atan2(p1[1]-p0[1],p1[0]-p0[0])*180/Math.PI+")");return}
+  $("wait").classList.add("hid");
   const now=Date.now(),el=(now-plan.start)/1000,p=Math.min(Math.max(el/plan.dur,0),1),km=gdist(plan.o,plan.d);
   const cur=interp(p),nxt=interp(Math.min(p+.002,1)),prv=interp(Math.max(p-.002,0));
   $("done").setAttribute("d",gpath({type:"LineString",coordinates:d3.range(0,p+1e-9,.01).concat([p]).map(interp)})||"");
@@ -260,12 +273,12 @@ function startTrack(){
   buildMap();tick();clearInterval(timer);timer=setInterval(tick,1000);
   try{navigator.wakeLock&&navigator.wakeLock.request("screen").catch(()=>{})}catch(e){}}
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&plan&&plan.start)tick()});
-$("adj").onclick=()=>{const el=(Date.now()-plan.start)/1000;const cur=Math.max(0,Math.round((plan.dur-el)/60));
+$("adj").onclick=()=>{if(plan.armed){alert("이륙 후에 수정할 수 있어요.");return}const el=(Date.now()-plan.start)/1000;const cur=Math.max(0,Math.round((plan.dur-el)/60));
   const v=prompt("지금부터 남은 비행시간을 분 단위로 입력하세요 (예: 기장 방송 '2시간 10분' → 130)",cur);if(v===null)return;const n=parseInt(v,10);if(isNaN(n)||n<0)return;
   plan.dur=el+n*60;save();tick()};
-$("stop").onclick=()=>{if(!confirm("추적을 끝낼까요?"))return;LS.del("ft_active");LS.del("ft_trk");trk=[];gpsOff();gps=null;clearInterval(timer);plan=null;history.replaceState(null,"",location.pathname);$("track").classList.add("hid");$("setup").classList.remove("hid");$("confirm").classList.add("hid")};
+$("stop").onclick=()=>{if(!confirm("추적을 끝낼까요?"))return;clearInterval(timer);plan=null;LS.del("ft_active");LS.del("ft_trk");trk=[];gpsOff();gps=null;history.replaceState(null,"",location.pathname);$("track").classList.add("hid");$("setup").classList.remove("hid");$("confirm").classList.add("hid")};
 
-drawSaved();const ex=load();if(ex&&ex.start){plan=ex;trk=LS.get("ft_trk")||[];startTrack();if(ex.gps)gpsOn()}
+drawSaved();const ex=load();if(ex&&(ex.start||ex.armed)){plan=ex;trk=LS.get("ft_trk")||[];startTrack();if(ex.gps)gpsOn()}
 </script>
 <script>if("serviceWorker"in navigator){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script>
 </body>
