@@ -109,6 +109,7 @@ button{width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-w
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="phase" id="phase">순항 중</span><span class="phase" id="gpsTag" style="color:var(--sub)">GPS 꺼짐</span></div>
     <div class="rg"><span>현재 위치</span><b id="rg">-</b><span id="rgSub"></span></div>
     <div class="rg"><span>창밖 해 방향</span><b id="sun" style="font-size:16px">-</b><span id="sunSub"></span></div>
+    <div class="rg cross"><span>창밖에 보이는 곳</span><div id="view" style="margin-top:6px"></div><span id="viewSub" style="display:block;margin-top:6px"></span></div>
     <div class="grid">
       <div class="st big"><span>경과 시간</span><b id="el">0:00:00</b></div>
       <div class="st big"><span>남은 시간</span><b id="rm">0:00:00</b></div>
@@ -355,7 +356,7 @@ drawOpts();
 function land(ts){if(!plan||plan.end)return;plan.end=ts||Date.now();delete plan._slow;saveLog();save();toast(plan.d.ko+" 착륙! 비행 기록을 저장했어요");tick()}
 function saveLog(){if(!plan||!plan.start||plan.logged)return;const end=plan.end||Date.now();if(end-plan.start<10*60000)return;
   const step=Math.max(1,Math.ceil(trk.length/150)),sm=trk.filter((x,i)=>i%step===0);
-  const lg={id:Date.now(),fn:plan.fn,o:plan.o,d:plan.d,start:plan.start,end,dist:Math.round(gdist(plan.o,plan.d)),maxAlt:plan.maxAlt||null,maxSpd:plan.maxSpd||null,trk:sm.map(x=>[+x[0].toFixed(3),+x[1].toFixed(3)]),ser:sm.filter(x=>x[3]!=null||x[4]!=null).map(x=>[Math.round((x[2]-plan.start)/60000),x[3],x[4]]),cross:(plan.cross||[]).map(c=>[c.n,c.t]),gps:trk.length>3};
+  const lg={id:Date.now(),fn:plan.fn,o:plan.o,d:plan.d,start:plan.start,end,dist:Math.round(gdist(plan.o,plan.d)),maxAlt:plan.maxAlt||null,maxSpd:plan.maxSpd||null,trk:sm.map(x=>[+x[0].toFixed(3),+x[1].toFixed(3)]),ser:sm.filter(x=>x[3]!=null||x[4]!=null).map(x=>[Math.round((x[2]-plan.start)/60000),x[3],x[4]]),cross:(plan.cross||[]).map(c=>[c.n,c.t]),near:(plan.seen||[]).map(s=>[s.n,s.t,s.k,s.s]),gps:trk.length>3};
   const L=LS.get("ft_logs")||[];L.push(lg);LS.set("ft_logs",L.slice(-30));plan.logged=true;drawLogs()}
 function miniMap(lg){const o=[lg.o.lon,lg.o.lat],d=[lg.d.lon,lg.d.lat],ip=d3.geoInterpolate(o,d),mid=ip(.5);const pj=d3.geoOrthographic().rotate([-mid[0],-mid[1]]).clipAngle(90);
   const line={type:"LineString",coordinates:d3.range(0,1.0001,.05).map(ip)};pj.fitExtent([[8,8],[92,62]],line);const gp=d3.geoPath(pj);
@@ -373,6 +374,7 @@ function drawLogs(){const L=(LS.get("ft_logs")||[]).slice().reverse(),box=$("log
     if(!op)return head;
     const det='<div style="padding:4px 0 12px">'+graph(lg)+'<div class="grid" style="margin-top:10px"><div class="st"><span>이륙</span><b style="font-size:16px">'+hm(new Date(lg.start),tzOf(lg.o))+' <small style="font-size:11px;color:var(--sub)">'+lg.o.code+' 현지</small></b></div><div class="st"><span>착륙</span><b style="font-size:16px">'+hm(new Date(lg.end),tzOf(lg.d))+' <small style="font-size:11px;color:var(--sub)">'+lg.d.code+' 현지</small></b></div><div class="st"><span>최고 고도</span><b style="font-size:16px">'+(lg.maxAlt?Math.round(lg.maxAlt*3.281).toLocaleString()+' ft':'-')+'</b></div><div class="st"><span>최고 속도</span><b style="font-size:16px">'+(lg.maxSpd?Math.round(lg.maxSpd)+' km/h':'-')+'</b></div></div>'+
       (cr.length?'<div class="rg cross"><span>지나온 곳</span><div style="margin-top:6px">'+cr.map(c=>'<div><span>'+(c[1]?hm(new Date(c[1])):'')+'</span>'+c[0]+'</div>').join('')+'</div></div>':'')+
+      (lg.near&&lg.near.length?'<div class="rg cross"><span>가까이 지나간 곳</span><div style="margin-top:6px">'+lg.near.map(c=>'<div><span>'+hm(new Date(c[1]))+'</span>'+c[0]+' <small style="color:var(--sub)">'+c[3]+' '+c[2]+'km</small></div>').join('')+'</div></div>':'')+
       '<button class="ghost" data-del="'+lg.id+'" style="margin-top:10px">이 기록 삭제</button></div>';
     return head+det}).join("");
   box.querySelectorAll("[data-open]").forEach(e=>e.onclick=()=>{const id=+e.dataset.open;openLog=openLog===id?null:id;drawLogs()});
@@ -384,7 +386,21 @@ $("stop").onclick=()=>{if(!plan)return;if(plan.end){resetAll();window.scrollTo(0
   if(airborne){if(!confirm("착륙한 걸로 처리하고 비행 기록을 저장할까요?\n(취소하면 기록 없이 끝낼지 다시 물어봐요)")){if(confirm("기록 없이 추적을 끝낼까요?"))resetAll();return}plan.end=Date.now();saveLog();resetAll();return}
   if(confirm("추적을 끝낼까요?"))resetAll()};
 
-function tick(){baseTick();extraTick()}
+const CITIES=[["싱가포르",1.29,103.85],["조호르바루",1.49,103.74],["쿠알라룸푸르",3.14,101.69],["쿠안탄",3.82,103.33],["코타바루",6.13,102.24],["쿠칭",1.55,110.34],["나투나 제도",3.9,108.39],["아남바스 제도",3.0,106.2],["브루나이",4.89,114.94],["코타키나발루",5.98,116.07],["호치민",10.78,106.70],["붕따우",10.35,107.08],["곤다오 섬",8.68,106.61],["판티엣",10.93,108.10],["나트랑",12.24,109.19],["퀴논",13.78,109.22],["다낭",16.05,108.22],["후에",16.46,107.59],["하노이",21.03,105.85],["하롱베이",20.95,107.07],["하이커우",20.04,110.32],["산야",18.25,109.51],["시사군도(파라셀)",16.5,111.9],["난사군도(스프래틀리)",10.0,114.5],["스카버러 암초",15.15,117.76],["둥사군도(프라타스)",20.70,116.72],["홍콩",22.32,114.17],["마카오",22.20,113.55],["선전",22.54,114.06],["광저우",23.13,113.26],["산터우",23.35,116.68],["샤먼",24.48,118.09],["진먼섬",24.44,118.32],["펑후 제도",23.57,119.58],["가오슝",22.63,120.30],["타이난",22.99,120.21],["타이중",24.15,120.67],["타이베이",25.03,121.56],["화롄",23.99,121.60],["푸저우",26.07,119.30],["원저우",28.0,120.67],["닝보",29.87,121.54],["저우산 군도",30.0,122.2],["상하이",31.23,121.47],["항저우",30.27,120.15],["칭다오",36.07,120.38],["마닐라",14.60,120.98],["바기오",16.41,120.60],["라오아그",18.20,120.59],["바탄 제도",20.45,121.97],["세부",10.32,123.89],["보라카이",11.97,121.92],["팔라완",9.74,118.73],["요나구니섬",24.47,123.0],["이시가키섬",24.34,124.16],["미야코지마",24.80,125.28],["오키나와",26.21,127.68],["아마미오시마",28.38,129.49],["가고시마",31.60,130.56],["나가사키",32.75,129.88],["후쿠오카",33.59,130.40],["쓰시마",34.20,129.29],["히로시마",34.39,132.46],["오사카",34.69,135.50],["도쿄",35.68,139.69],["제주",33.50,126.53],["서귀포",33.25,126.56],["목포",34.81,126.39],["광주",35.16,126.85],["여수",34.76,127.66],["통영",34.85,128.43],["거제",34.88,128.62],["창원",35.23,128.68],["부산",35.18,129.08],["울산",35.54,129.31],["대구",35.87,128.60],["경주",35.86,129.22],["서울",37.57,126.98],["방콕",13.76,100.50],["파타야",12.93,100.88],["프놈펜",11.56,104.92],["푸꾸옥",10.29,103.98],["코사무이",9.51,100.01]];
+function viewTick(){const box=$("view");if(!plan||!box)return;
+  if(plan.armed||!plan.start){box.innerHTML="<div style='color:var(--sub)'>이륙하면 창밖에 보이는 도시·섬을 알려줘요</div>";$("viewSub").textContent="";return}
+  if(plan.end){box.innerHTML="<div style='color:var(--sub)'>도착했어요</div>";$("viewSub").textContent="";return}
+  const cp=curPos(),hd=cp.hd!=null?cp.hd:bearing(cp.ll,[plan.d.lon,plan.d.lat]),here={lon:cp.ll[0],lat:cp.ll[1]};
+  const alt=cp.real&&gps&&gps.alt!=null&&gps.alt>500?gps.alt:null,hor=alt?3.57*Math.sqrt(alt):null,R=Math.min(hor||200,250);
+  const near=CITIES.map(c=>{const k=gdist(here,{lat:c[1],lon:c[2]}),rel=(bearing(cp.ll,[c[2],c[1]])-hd+360)%360;
+    const side=k<15?"바로 아래":(rel<30||rel>330)?"앞쪽":(rel>150&&rel<210)?"뒤쪽":rel<180?"오른쪽 창":"왼쪽 창";return{n:c[0],k:Math.round(k),side}}).filter(c=>c.k<=R).sort((a,b)=>a.k-b.k).slice(0,4);
+  box.innerHTML=near.length?near.map(c=>"<div><span style='width:84px'>"+c.side+"</span>"+c.n+" <small style='color:var(--sub)'>"+c.k+"km</small></div>").join(""):"<div style='color:var(--sub)'>반경 "+Math.round(R)+"km 안에 도시가 없어요 · 망망대해 구간</div>";
+  $("viewSub").textContent=(hor?"이 고도에선 지평선까지 약 "+Math.round(hor)+"km":"GPS 고도가 없어 반경 200km 기준")+" · 밤엔 도시 불빛, 낮엔 해안선을 찾아보세요"+(cp.real?"":" · 예상 위치 기준");
+  plan.seen=plan.seen||[];
+  for(const c of near){if(c.k>100||c.side==="뒤쪽"||c.side==="앞쪽"||plan.seen.some(s=>s.n===c.n))continue;
+    plan.seen.push({n:c.n,t:Date.now(),k:c.k,s:c.side});save();
+    toast(c.side==="바로 아래"?c.n+" 바로 아래를 지나요":"지금 "+c.side+" 쪽에 "+c.n+" ("+c.k+"km)");break}}
+function tick(){baseTick();extraTick();viewTick()}
 function onFix(pos){baseFix(pos);extraFix(pos)}
 drawLogs();drawSaved();const ex=load();if(ex&&(ex.start||ex.armed)){plan=ex;trk=LS.get("ft_trk")||[];startTrack();if(ex.gps)gpsOn()}
 </script>
