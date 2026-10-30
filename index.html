@@ -48,7 +48,7 @@ button{width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-w
 <body>
 <div id="toast"></div>
 <div class="wrap">
-<h1>✈ 비행 트래커<small id="net"></small></h1>
+<h1><span id="ttl">✈ 비행 트래커</span><small id="net"></small></h1>
 
 <div id="setup">
   <div class="card">
@@ -74,6 +74,7 @@ button{width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-w
     </div>
     <div class="msg">시간·분. 거리 기준 자동 계산값이에요. 항공권에 적힌 시간에서 지상 이동(약 20~30분)을 뺀 값으로 맞추면 더 정확해요.</div>
     <button class="pri" id="go">추적 준비</button>
+    <button class="sec" id="shareBtn1">가족에게 위치 공유</button>
     <div class="msg">탑승 후 눌러두면 이륙 대기 상태가 돼요. GPS가 켜져 있으면 속도가 시속 220km를 넘는 순간(이륙 활주) 자동으로 추적이 시작되고, GPS 없이 쓸 땐 이륙할 때 "지금 이륙했어요"를 누르면 돼요.</div>
   </div>
 
@@ -98,6 +99,7 @@ button{width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-w
       <div class="mid"><div id="tF" style="color:var(--text);font-weight:600"></div><div class="ln"></div><div id="tDist"></div></div>
       <div class="ap"><b id="tD"></b><span id="tDn"></span></div>
     </div>
+    <div class="msg hid" id="vnote" style="margin-top:12px"></div>
     <svg id="map" viewBox="0 0 360 300"></svg>
     <div id="wait" class="hid" style="margin-top:14px;text-align:center">
       <div style="font-size:15px;font-weight:600">이륙 대기 중</div>
@@ -131,6 +133,9 @@ button{width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-w
     <div class="row">
       <button class="sec" id="adj">시간 수정</button>
       <button class="ghost" id="stop" style="margin-top:12px">종료</button>
+    </div>
+    <div class="row" style="margin-top:0">
+      <button class="sec" id="shareBtn2">가족에게 위치 공유</button>
     </div>
     <div class="rg cross"><span>지나온 곳</span><div id="crossList" style="margin-top:6px"></div></div>
     <div class="note">GPS가 꺼져 있거나 끊기면 대권항로 기준 추정치로 보여줘요. GPS가 잡히면 남은 시간도 실제 속도로 다시 계산해요(착륙 전 강하 약 10분 포함). 화면을 꺼도 시작 시각이 저장돼 있어서, 다시 열면 그 순간 기준으로 정확히 다시 계산돼요. 기장 안내방송으로 남은 시간을 들으면 "시간 수정"에서 맞춰주세요.</div>
@@ -208,7 +213,7 @@ $("go").onclick=()=>{const mn=(+$("hh").value||0)*60+(+$("mm").value||0);if(mn<1
   plan.start=null;plan.armed=true;plan.dur=mn*60;trk=[];LS.del("ft_trk");save();startTrack();if(watchId==null)gpsOn()};
 function takeoff(ts){if(!plan||!plan.armed)return;plan.armed=false;plan.start=ts||Date.now();delete plan._fast;trk=[];LS.del("ft_trk");save();$("wait").classList.add("hid");tick()}
 $("takeoff").onclick=()=>takeoff(Date.now());
-function save(){if(plan)LS.set("ft_active",plan)}
+function save(){if(plan&&!plan.viewer)LS.set("ft_active",plan)}
 function load(){if(location.hash)try{history.replaceState(null,"",location.pathname)}catch(e){}return LS.get("ft_active")}
 
 let proj,gpath,interp;
@@ -317,7 +322,7 @@ function curPos(){if(gpsFresh())return{ll:[gps.lon,gps.lat],hd:(gps.hd!=null&&!i
 let toastT=null;function toast(t){const e=$("toast");e.textContent=t;e.classList.add("on");clearTimeout(toastT);toastT=setTimeout(()=>e.classList.remove("on"),4500)}
 function extraTick(){if(!plan)return;const cp=curPos(),[lon,lat]=cp.ll;
   const r=regionAt(lon,lat);const nearD=gdist({lat,lon},plan.d)<40;const label=nearD?plan.d.ko+" 인근":(r.name+(r.land?" 상공":" 위"));
-  $("rg").textContent=plan.armed?plan.o.ko+" 공항 대기 중":(plan.end?plan.d.ko+" 도착":"지금 "+label);
+  $("rg").textContent=plan.armed?plan.o.ko+" 공항 대기 중":(plan.end?plan.d.ko+" 도착":(plan.viewer?josa(plan.who,"은","는")+" 지금 ":"지금 ")+label);
   $("rgSub").textContent=(cp.real?"GPS 실측 위치 기준":"예상 위치 기준")+" · "+ll(cp.ll);
   if(plan.start&&!plan.armed&&!plan.end){plan.cross=plan.cross||[];const lastC=plan.cross[plan.cross.length-1];
     if(!lastC||lastC.n!==label){if(lastC)toast(nearD?label+" 도착":label.replace(/ (상공|위)$/,"")+" 진입");plan.cross.push({n:label,t:Date.now()});if(plan.cross.length>40)plan.cross.shift();save()}}
@@ -400,9 +405,30 @@ function viewTick(){const box=$("view");if(!plan||!box)return;
   for(const c of near){if(c.k>100||c.side==="뒤쪽"||c.side==="앞쪽"||plan.seen.some(s=>s.n===c.n))continue;
     plan.seen.push({n:c.n,t:Date.now(),k:c.k,s:c.side});save();
     toast(c.side==="바로 아래"?c.n+" 바로 아래를 지나요":"지금 "+c.side+" 쪽에 "+c.n+" ("+c.k+"km)");break}}
-function tick(){baseTick();extraTick();viewTick()}
+function tick(){if(plan&&plan.viewer)plan.armed=Date.now()<plan.start;baseTick();extraTick();viewTick()}
 function onFix(pos){baseFix(pos);extraFix(pos)}
-drawLogs();drawSaved();const ex=load();if(ex&&(ex.start||ex.armed)){plan=ex;trk=LS.get("ft_trk")||[];startTrack();if(ex.gps)gpsOn()}
+function josa(n,a,b){const c=n.charCodeAt(n.length-1);if(!(c>=0xAC00&&c<=0xD7A3))return n+b;return n+((c-0xAC00)%28?a:b)}
+async function share(){if(!plan)return;let st=plan.start;const dur=plan.dur||((+$("hh").value||0)*60+(+$("mm").value||0))*60;if(dur<600){alert("비행시간을 확인해 주세요.");return}
+  if(!st){const d=new Date(Date.now()+30*60000);const v=prompt("이륙 예정 시각을 입력하세요 (내 폰 시각, 예: 18:30)\n이륙이 늦어지면 공유를 한 번 더 보내주세요",p2(d.getHours())+":"+p2(d.getMinutes()));if(v===null)return;
+    const m=v.trim().match(/^(\d{1,2})[:시 ]?\s*(\d{2})/);if(!m){alert("18:30 형식으로 입력해 주세요");return}const t=new Date();t.setHours(+m[1],+m[2],0,0);if(t.getTime()<Date.now()-3*3600e3)t.setDate(t.getDate()+1);st=t.getTime()}
+  const o=opt();const w=prompt("공유받는 사람 화면에 보일 이름 (예: 남편, 아빠)",o.who||"남편");if(w===null)return;o.who=w.trim()||"남편";LS.set("ft_opts",o);
+  const sl=a=>({code:a.code,ko:a.ko,lat:+(+a.lat).toFixed(4),lon:+(+a.lon).toFixed(4),cc:a.cc||undefined});
+  const pl={v:1,w:o.who,fn:plan.fn,o:sl(plan.o),d:sl(plan.d),dur:Math.round(dur),st,real:!!plan.start};
+  const enc=btoa(unescape(encodeURIComponent(JSON.stringify(pl)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  const url=location.origin+location.pathname+"#s="+enc,text=josa(o.who,"은","는")+" 지금 어디에? ✈ "+plan.fn+" "+plan.o.ko+"→"+plan.d.ko+" 위치 보기 (출발지 현지 "+hm(new Date(st),tzOf(plan.o))+" 이륙 기준 예상)";
+  try{if(navigator.share){await navigator.share({title:"비행 위치 공유",text,url});return}}catch(e){if(e&&e.name==="AbortError")return}
+  try{await navigator.clipboard.writeText(text+"\n"+url);toast("링크를 복사했어요 · 카톡에 붙여넣으세요")}catch(e){prompt("이 링크를 복사해서 보내세요",url)}}
+$("shareBtn1").onclick=share;$("shareBtn2").onclick=share;
+function readShare(){const m=location.hash.match(/^#s=([A-Za-z0-9_-]+)/);if(!m)return null;try{let b=m[1].replace(/-/g,"+").replace(/_/g,"/");while(b.length%4)b+="=";const s=JSON.parse(decodeURIComponent(escape(atob(b))));return s&&s.o&&s.d&&s.st&&s.dur?s:null}catch(e){return null}}
+function startViewer(s){plan={fn:s.fn,o:s.o,d:s.d,dur:s.dur,start:s.st,viewer:true,who:s.w||"남편",armed:Date.now()<s.st};const q=josa(plan.who,"은","는")+" 지금 어디에?";
+  document.title=q;$("ttl").textContent="✈ "+q;
+  ["gpsBtn","adj","gmsg","shareBtn2","takeoff","gpsTag","logCard"].forEach(i=>{const e=$(i);if(e)e.style.display="none"});$("optSaver").parentNode.style.display="none";
+  ["alt","acc"].forEach(i=>{$(i).parentNode.style.display="none"});
+  $("waitMsg").textContent="이륙 예정 "+hm(new Date(s.st))+" (이 폰 시각)";
+  $("vnote").textContent="기내엔 인터넷이 없어서 실시간 GPS가 아니라 "+(s.real?"실제 이륙 시각":"이륙 예정 시각")+"(이 폰 시각 "+hm(new Date(s.st))+") 기준 예상 위치예요."+(s.real?"":" 이륙이 늦어지면 그만큼 차이가 나요.");$("vnote").classList.remove("hid");
+  $("stop").textContent="내 화면으로";$("stop").onclick=()=>{history.replaceState(null,"",location.pathname);location.reload()};startTrack()}
+const SH=readShare();
+drawLogs();drawSaved();if(SH)startViewer(SH);else{const ex=load();if(ex&&(ex.start||ex.armed)){plan=ex;trk=LS.get("ft_trk")||[];startTrack();if(ex.gps)gpsOn()}}
 </script>
 <script>if("serviceWorker"in navigator){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script>
 </body>
