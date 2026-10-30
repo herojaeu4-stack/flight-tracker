@@ -430,6 +430,6 @@ function startViewer(s){plan={fn:s.fn,o:s.o,d:s.d,dur:s.dur,start:s.st,viewer:tr
 const SH=readShare();
 drawLogs();drawSaved();if(SH)startViewer(SH);else{const ex=load();if(ex&&(ex.start||ex.armed)){plan=ex;trk=LS.get("ft_trk")||[];startTrack();if(ex.gps)gpsOn()}}
 </script>
-<script>if("serviceWorker"in navigator){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script>
+<script>if("serviceWorker"in navigator){addEventListener("load",()=>navigator.serviceWorker.register("sw.js",{updateViaCache:"none"}).then(r=>r.update()).catch(()=>{}).catch(()=>{}))}</script>
 </body>
 </html>
